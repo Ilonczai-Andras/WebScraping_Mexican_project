@@ -1,0 +1,68 @@
+[
+  {
+    "startDate": "01/09/1994",
+    "endDate": "31/08/1997",
+    "value": 56,
+    "name": "LVI"
+  },
+  {
+    "startDate": "22/08/1997",
+    "endDate": "31/08/2000",
+    "value": 57,
+    "name": "LVII"
+  },
+  {
+    "startDate": "28/08/2000",
+    "endDate": "31/08/2003",
+    "value": 58,
+    "name": "LVIII"
+  },
+  {
+    "startDate": "29/08/2003",
+    "endDate": "31/08/2006",
+    "value": 59,
+    "name": "LIX"
+  },
+  {
+    "startDate": "28/08/2006",
+    "endDate": "01/09/2009",
+    "value": 60,
+    "name": "LX"
+  },
+  {
+    "startDate": "29/08/2009",
+    "endDate": "31/08/2012",
+    "value": 61,
+    "name": "LXI"
+  },
+  {
+    "startDate": "29/08/2012",
+    "endDate": "31/08/2015",
+    "value": 62,
+    "name": "LXII"
+  },
+  {
+    "startDate": "29/08/2015",
+    "endDate": "31/08/2018",
+    "value": 63,
+    "name": "LXIII"
+  },
+  {
+    "startDate": "29/08/2018",
+    "endDate": "31/08/2021",
+    "value": 64,
+    "name": "LXIV"
+  },
+  {
+    "startDate": "29/08/2021",
+    "endDate": "31/08/2024",
+    "value": 65,
+    "name": "LXV"
+  },
+  {
+    "startDate": "29/08/2024",
+    "endDate": "31/08/2027",
+    "value": 66,
+    "name": "LXVI"
+  }
+]

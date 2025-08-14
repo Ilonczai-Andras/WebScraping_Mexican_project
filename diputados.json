@@ -1,5 +1,11 @@
 [
   {
+    "startDate": "01/09/1994",
+    "endDate": "31/08/1997",
+    "value": 56,
+    "name": "LVI"
+  },
+  {
     "startDate": "22/08/1997",
     "endDate": "31/08/2000",
     "value": 57,
