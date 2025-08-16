@@ -11,12 +11,15 @@ from datetime import datetime
 import os
 import json
 import sys
+import logging
 
 class ParliamentaryScraper:
-    def __init__(self, headless=True, output_folder="exported_excels"):
+    def __init__(self, headless=True, output_folder="exported_excels", log_folder="logs"):
         self.setup_driver(headless)
         self.output_folder = output_folder
+        self.log_folder = log_folder
         self.setup_output_folder()
+        self.setup_logging()
         
     def setup_driver(self, headless):
         """Set up Chrome driver with optimized options for speed"""
@@ -54,10 +57,53 @@ class ParliamentaryScraper:
         self.driver.set_page_load_timeout(15)
 
     def setup_output_folder(self):
-        """Create output folder if it doesn't exist"""
+        """Create output and log folders if they don't exist"""
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
         self.folder_path = os.path.join(project_root, self.output_folder)
+        self.log_folder_path = os.path.join(project_root, self.log_folder)
+        
         os.makedirs(self.folder_path, exist_ok=True)
+        os.makedirs(self.log_folder_path, exist_ok=True)
+
+    def setup_logging(self):
+        """Set up logging configuration"""
+        # Generate log filename with timestamp including milliseconds
+        now = datetime.now()
+        log_filename = f"scraping_session_{now.strftime('%Y%m%d_%H%M%S')}_{now.microsecond//1000:03d}.log"
+        log_filepath = os.path.join(self.log_folder_path, log_filename)
+        
+        # Create logger
+        self.logger = logging.getLogger('ParliamentaryScraper')
+        self.logger.setLevel(logging.INFO)
+        
+        # Clear any existing handlers
+        for handler in self.logger.handlers[:]:
+            self.logger.removeHandler(handler)
+        
+        # Create file handler
+        file_handler = logging.FileHandler(log_filepath, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        
+        # Create formatter
+        formatter = logging.Formatter(
+            '%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(formatter)
+        
+        # Add handler to logger
+        self.logger.addHandler(file_handler)
+        
+        # Store log file path for reference
+        self.log_file_path = log_filepath
+        
+        # Log initial setup
+        self.logger.info("=" * 80)
+        self.logger.info("PARLIAMENTARY SCRAPER SESSION STARTED")
+        self.logger.info(f"Log file: {log_filename}")
+        self.logger.info(f"Output folder: {self.log_folder_path}")
+        self.logger.info(f"Headless mode: {self.driver.execute_script('return navigator.webdriver') is None}")
+        self.logger.info("=" * 80)
     
     def extract_session_header(self):
         """Extract session header information with faster waits"""
@@ -122,7 +168,7 @@ class ParliamentaryScraper:
                     })
 
         except TimeoutException:
-            print("Could not find 'ASUNTOS ATENDIDOS' section")
+            self.logger.warning("Could not find 'ASUNTOS ATENDIDOS' section")
 
         return matters
     
@@ -150,8 +196,7 @@ class ParliamentaryScraper:
                     affairs.append(affair_data)
 
         except NoSuchElementException as e:
-            print(f"An error occurred: {e}")
-            print("Could not find the 'ASUNTOS' section or associated tables.")
+            self.logger.error(f"Could not find the 'ASUNTOS' section or associated tables: {e}")
         return affairs
 
     def extract_single_affair(self, block, affair_id):
@@ -231,7 +276,7 @@ class ParliamentaryScraper:
                 affair_data['Publicación'] = None
 
         except Exception as e:
-            print(f"Single affair extraction error: {e}")
+            self.logger.error(f"Single affair extraction error for {affair_id}: {e}")
             return None
 
         return affair_data
@@ -282,10 +327,18 @@ class ParliamentaryScraper:
                 if affairs_data:
                     pd.DataFrame(affairs_data).to_excel(writer, sheet_name='Affairs', index=False)
 
+            # Log successful save
+            self.logger.info(f"SUCCESS - Saved session to: {filename}")
+            self.logger.info(f"  - Session date: {session_date}")
+            self.logger.info(f"  - Session ID: {session_id}")
+            self.logger.info(f"  - Matters: {len(matters_data)}")
+            self.logger.info(f"  - Affairs: {len(affairs_data)}")
+
             return filepath
 
         except Exception as e:
-            print(f"\n💾 Error saving session to Excel: {e}", flush=True)
+            self.logger.error(f"ERROR saving session to Excel: {e}")
+            self.logger.error(f"  - URL: {session_data.get('url', 'Unknown')}")
             return None
     
     def scrape_session(self, url):
@@ -293,6 +346,8 @@ class ParliamentaryScraper:
         start_time = time.time()
         try:
             print(f"Scraping: {url}", end=" ... ", flush=True)
+            self.logger.info(f"STARTING - {url}")
+            
             self.driver.get(url)
             
             # Reduced wait time and check if page is ready
@@ -317,19 +372,37 @@ class ParliamentaryScraper:
             
             if saved_file:
                 print(f"✅ SUCCESS ({scraping_time:.2f}s)", flush=True)
+                self.logger.info(f"COMPLETED - {url} in {scraping_time:.2f}s")
+                self.logger.info("-" * 80)
             else:
                 print(f"⚠️ SCRAPED BUT SAVE FAILED ({scraping_time:.2f}s)", flush=True)
+                self.logger.warning(f"SCRAPED BUT SAVE FAILED - {url} in {scraping_time:.2f}s")
+                self.logger.info("-" * 80)
             
             return session_data
             
         except Exception as e:
             end_time = time.time()
             scraping_time = end_time - start_time
+            error_msg = str(e)[:100] + "..." if len(str(e)) > 100 else str(e)
             print(f"❌ FAILED ({scraping_time:.2f}s) - {str(e)[:50]}...", flush=True)
+            self.logger.error(f"FAILED - {url} in {scraping_time:.2f}s")
+            self.logger.error(f"  - Error: {error_msg}")
+            self.logger.info("-" * 80)
             return None
     
     def close(self):
-        """Close the webdriver"""
+        """Close the webdriver and finalize logging"""
+        self.logger.info("=" * 80)
+        self.logger.info("PARLIAMENTARY SCRAPER SESSION ENDED")
+        self.logger.info(f"Log saved to: {self.log_file_path}")
+        self.logger.info("=" * 80)
+        
+        # Close all handlers
+        for handler in self.logger.handlers[:]:
+            handler.close()
+            self.logger.removeHandler(handler)
+            
         self.driver.quit()
 
 def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visible: bool = True, delay: float = 0.5):
@@ -357,10 +430,20 @@ def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visib
         print(f"🚀 Starting to process {total_urls} URLs...")
         print("=" * 80)
         
+        # Log session start details
+        scraper.logger.info(f"BATCH PROCESSING STARTED")
+        scraper.logger.info(f"Total URLs to process: {total_urls}")
+        scraper.logger.info(f"Sessions to scrape: {len(sessions_to_scrape)}")
+        scraper.logger.info(f"Delay between requests: {delay}s")
+        scraper.logger.info(f"Visible mode: {visible}")
+        
         overall_start_time = time.time()
         
         for session in sessions_to_scrape:
+            session_name = session.get("name", "Unknown")
             urls = session.get("data", {}).get("links", [])
+            scraper.logger.info(f"Processing session '{session_name}' with {len(urls)} URLs")
+            
             for i, url in enumerate(urls, 1):
                 current_session = successful_scrapes + failed_scrapes + 1
                 
@@ -385,6 +468,13 @@ def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visib
                       f"ETA: {estimated_remaining/60:.1f}m", flush=True)
                 print("-" * 80, flush=True)
                 
+                # Log progress every 10 sessions
+                if current_session % 10 == 0:
+                    scraper.logger.info(f"PROGRESS - {current_session}/{total_urls} sessions processed")
+                    scraper.logger.info(f"  - Success rate: {success_rate:.1f}%")
+                    scraper.logger.info(f"  - Average time: {avg_time_per_session:.1f}s")
+                    scraper.logger.info(f"  - Estimated remaining: {estimated_remaining/60:.1f}m")
+                
                 if current_session < total_urls:  # Don't delay after last session
                     time.sleep(delay)
         
@@ -399,6 +489,15 @@ def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visib
         print(f"⚡ Average per session: {total_elapsed/total_urls:.1f} seconds")
         print("=" * 80)
         
+        # Log final summary
+        scraper.logger.info("BATCH PROCESSING COMPLETED")
+        scraper.logger.info(f"Total URLs processed: {total_urls}")
+        scraper.logger.info(f"Successful scrapes: {successful_scrapes}")
+        scraper.logger.info(f"Failed scrapes: {failed_scrapes}")
+        scraper.logger.info(f"Success rate: {(successful_scrapes/total_urls)*100:.1f}%")
+        scraper.logger.info(f"Total time: {total_elapsed/60:.1f} minutes")
+        scraper.logger.info(f"Average per session: {total_elapsed/total_urls:.1f} seconds")
+        
     except KeyboardInterrupt:
         current_session = successful_scrapes + failed_scrapes
         success_rate = (successful_scrapes / current_session * 100) if current_session > 0 else 0
@@ -407,8 +506,15 @@ def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visib
         print(f"❌ Failed: {failed_scrapes} sessions") 
         print(f"📊 Success rate: {success_rate:.1f}%")
         print(f"📈 Progress: {current_session}/{total_urls} sessions processed")
+        
+        # Log interruption
+        scraper.logger.warning("BATCH PROCESSING INTERRUPTED BY USER")
+        scraper.logger.info(f"Sessions processed before interruption: {current_session}/{total_urls}")
+        scraper.logger.info(f"Success rate at interruption: {success_rate:.1f}%")
+        
     except Exception as e:
         print(f"💥 Unexpected error during processing: {e}")
+        scraper.logger.error(f"UNEXPECTED ERROR during batch processing: {e}")
     finally:
         scraper.close()
         print("🔌 WebDriver closed.")
