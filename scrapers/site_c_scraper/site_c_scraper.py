@@ -14,18 +14,18 @@ import sys
 import logging
 
 class ParliamentaryScraper:
-    def __init__(self, headless=True, output_folder="exported_excels", log_folder="logs"):
-        self.setup_driver(headless)
+    def __init__(self, visible=False, output_folder="exported_excels", log_folder="logs"):
+        self.setup_driver(visible)
         self.output_folder = output_folder
         self.log_folder = log_folder
         self.setup_output_folder()
         self.setup_logging()
         
-    def setup_driver(self, headless):
+    def setup_driver(self, visible):
         """Set up Chrome driver with optimized options for speed"""
         chrome_options = Options()
-        if headless:
-            chrome_options.add_argument("--headless")
+        if not visible:
+            chrome_options.add_argument("--headless=new")
 
         # Performance optimizations
         chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
@@ -405,7 +405,7 @@ class ParliamentaryScraper:
             
         self.driver.quit()
 
-def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visible: bool = True, delay: float = 0.5):
+def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visible: bool = False, delay: float = 0.5):
     """Process sessions from JSON file with auto-save after each successful scrape"""
     with open(file, "r", encoding="utf-8") as f:
         json_file = json.load(f)
@@ -419,7 +419,7 @@ def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visib
             print(f"No session found with name '{scrape_name}'")
             return
 
-    scraper = ParliamentaryScraper(headless=not visible)
+    scraper = ParliamentaryScraper(visible=visible)
 
     try:
         successful_scrapes = 0
