@@ -10,36 +10,62 @@ import re
 from datetime import datetime
 import os
 import json
+import sys
 
 class ParliamentaryScraper:
-    def __init__(self, headless=True):
+    def __init__(self, headless=True, output_folder="exported_excels"):
         self.setup_driver(headless)
-        self.session_data = []
+        self.output_folder = output_folder
+        self.setup_output_folder()
         
     def setup_driver(self, headless):
-        """Set up Chrome driver with options"""
+        """Set up Chrome driver with optimized options for speed"""
         chrome_options = Options()
         if headless:
             chrome_options.add_argument("--headless")
 
+        # Performance optimizations
         chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
         chrome_options.add_argument('--log-level=3')
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-plugins")
+        chrome_options.add_argument("--disable-images")  # Don't load images
+        chrome_options.add_argument("--disable-javascript")  # Only if site works without JS
+        chrome_options.add_argument("--disable-css")  # Don't load CSS
+        chrome_options.add_argument("--disable-web-security")
+        chrome_options.add_argument("--aggressive-cache-discard")
+        chrome_options.add_argument("--memory-pressure-off")
+        chrome_options.add_argument("--max_old_space_size=4096")
+        
+        # Disable logging
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
+        chrome_options.add_argument('--log-level=3')
+        
+        # Set page load strategy to 'eager' (don't wait for all resources)
+        chrome_options.page_load_strategy = 'eager'
         
         self.driver = webdriver.Chrome(options=chrome_options)
-        self.wait = WebDriverWait(self.driver, 10)
+        
+        self.wait = WebDriverWait(self.driver, 5)
+        
+        self.driver.set_page_load_timeout(15)
+
+    def setup_output_folder(self):
+        """Create output folder if it doesn't exist"""
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        self.folder_path = os.path.join(project_root, self.output_folder)
+        os.makedirs(self.folder_path, exist_ok=True)
     
     def extract_session_header(self):
-        """Extract session header information"""
+        """Extract session header information with faster waits"""
         header_data = {}
-
-        wait = WebDriverWait(self.driver, 10)
 
         def get_value(label):
             try:
-                cell = wait.until(
+                cell = self.wait.until(
                     EC.presence_of_element_located(
                         (By.XPATH, f"//table//tr[td[1][contains(., '{label}')]]/td[2]")
                     )
@@ -117,9 +143,6 @@ class ParliamentaryScraper:
             # Find all tables inside the last <tr>, excluding the one with the navigation image.
             # This XPath selects tables that do NOT contain an <img> with a specific src attribute.
             affair_tables = content_tr.find_elements(By.XPATH, "./td/table[not(.//img[contains(@src, 'principio.jpg')])]")
-            # affair_data = self.extract_single_affair(affair_tables[0], f"AFF{0+1:03d}")
-            # if affair_data:
-            #         affairs.append(affair_data)
 
             for i, block in enumerate(affair_tables):
                 affair_data = self.extract_single_affair(block, f"AFF{i+1:03d}")
@@ -212,69 +235,6 @@ class ParliamentaryScraper:
             return None
 
         return affair_data
-    
-    def scrape_session(self, url):
-        """Main method to scrape a parliamentary session"""
-        try:
-            print(f"Scraping: {url}")
-            self.driver.get(url)
-            
-            # Wait for page to load
-            time.sleep(3)
-            
-            # Extract all sections
-            session_data = {
-                'url': url,
-                'scraped_at': datetime.now().isoformat(),
-                'header': self.extract_session_header(),
-                'matters_attended': self.extract_matters_attended(),
-                'affairs': self.extract_affairs()
-            }
-            
-            self.session_data.append(session_data)
-            print(f"Successfully scraped session data")
-            
-            return session_data
-            
-        except Exception as e:
-            print(f"Error scraping {url}: {e}")
-            return None
-
-    def save_to_excel_per_session(self, folder="exported_excels"):
-        if not self.session_data:
-            print("No data to save")
-            return
-
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        folder_path = os.path.join(project_root, folder)
-        os.makedirs(folder_path, exist_ok=True)
-
-        for session in self.session_data:
-            # Safe filename based on session date
-            session_date = session['header'].get('date', 'unknown_date')
-            safe_date = re.sub(r'[\\/*?:"<>|]', '-', session_date)
-            filename = f"parliamentary_session_{safe_date}.xlsx"
-            filepath = os.path.join(folder_path, filename)
-
-            session_id = self.generate_session_id(session_date)
-
-            # Prepare data
-            header = session['header'].copy()
-            header['session_id'] = session_id
-            header['url'] = session['url']
-
-            matters_data = [ {**m, 'session_id': session_id} for m in session['matters_attended'] ]
-            affairs_data = [ {**a, 'session_id': session_id} for a in session['affairs'] ]
-
-            # Save Excel
-            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-                pd.DataFrame([header]).to_excel(writer, sheet_name='Session_Headers', index=False)
-                if matters_data:
-                    pd.DataFrame(matters_data).to_excel(writer, sheet_name='Matters_Attended', index=False)
-                if affairs_data:
-                    pd.DataFrame(affairs_data).to_excel(writer, sheet_name='Affairs', index=False)
-
-            print(f"Session data saved to {filepath}")
 
     def generate_session_id(self, date_str):
         """Generate session ID from date string"""
@@ -293,12 +253,87 @@ class ParliamentaryScraper:
             pass
             
         return datetime.now().strftime("%Y%m%d")
+
+    def save_session_to_excel(self, session_data):
+        """Save a single session's data to Excel immediately"""
+        try:
+            # Safe filename based on session date
+            session_date = session_data['header'].get('date', 'unknown_date')
+            safe_date = re.sub(r'[\\/*?:"<>|]', '-', session_date)
+            filename = f"parliamentary_session_{safe_date}.xlsx"
+            filepath = os.path.join(self.folder_path, filename)
+
+            session_id = self.generate_session_id(session_date)
+
+            # Prepare data with session_id
+            header = session_data['header'].copy()
+            header['session_id'] = session_id
+            header['url'] = session_data['url']
+            header['scraped_at'] = session_data['scraped_at']
+
+            matters_data = [{**m, 'session_id': session_id} for m in session_data['matters_attended']]
+            affairs_data = [{**a, 'session_id': session_id} for a in session_data['affairs']]
+
+            # Save to Excel
+            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                pd.DataFrame([header]).to_excel(writer, sheet_name='Session_Headers', index=False)
+                if matters_data:
+                    pd.DataFrame(matters_data).to_excel(writer, sheet_name='Matters_Attended', index=False)
+                if affairs_data:
+                    pd.DataFrame(affairs_data).to_excel(writer, sheet_name='Affairs', index=False)
+
+            return filepath
+
+        except Exception as e:
+            print(f"\n💾 Error saving session to Excel: {e}", flush=True)
+            return None
+    
+    def scrape_session(self, url):
+        """Main method to scrape a parliamentary session and save immediately"""
+        start_time = time.time()
+        try:
+            print(f"Scraping: {url}", end=" ... ", flush=True)
+            self.driver.get(url)
+            
+            # Reduced wait time and check if page is ready
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            
+            # Extract all sections
+            session_data = {
+                'url': url,
+                'scraped_at': datetime.now().isoformat(),
+                'header': self.extract_session_header(),
+                'matters_attended': self.extract_matters_attended(),
+                'affairs': self.extract_affairs()
+            }
+            
+            # Save immediately after successful scrape
+            saved_file = self.save_session_to_excel(session_data)
+            
+            end_time = time.time()
+            scraping_time = end_time - start_time
+            
+            if saved_file:
+                print(f"✅ SUCCESS ({scraping_time:.2f}s)", flush=True)
+            else:
+                print(f"⚠️ SCRAPED BUT SAVE FAILED ({scraping_time:.2f}s)", flush=True)
+            
+            return session_data
+            
+        except Exception as e:
+            end_time = time.time()
+            scraping_time = end_time - start_time
+            print(f"❌ FAILED ({scraping_time:.2f}s) - {str(e)[:50]}...", flush=True)
+            return None
     
     def close(self):
         """Close the webdriver"""
         self.driver.quit()
 
-def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visible: bool = True):
+def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visible: bool = True, delay: float = 0.5):
+    """Process sessions from JSON file with auto-save after each successful scrape"""
     with open(file, "r", encoding="utf-8") as f:
         json_file = json.load(f)
 
@@ -311,15 +346,69 @@ def process_sessions(file: str, scrape_all: bool, scrape_name: str = None, visib
             print(f"No session found with name '{scrape_name}'")
             return
 
-    scraper = ParliamentaryScraper(headless=visible)
+    scraper = ParliamentaryScraper(headless=not visible)
 
     try:
+        successful_scrapes = 0
+        failed_scrapes = 0
+        total_urls = sum(len(session.get("data", {}).get("links", [])) for session in sessions_to_scrape)
+        total_time = 0
+        
+        print(f"🚀 Starting to process {total_urls} URLs...")
+        print("=" * 80)
+        
+        overall_start_time = time.time()
+        
         for session in sessions_to_scrape:
-            # Assuming scrape_session expects a URL inside the data dict
             urls = session.get("data", {}).get("links", [])
-            for url in urls:
-                scraper.scrape_session(url)
-                time.sleep(2)
-        scraper.save_to_excel()
+            for i, url in enumerate(urls, 1):
+                current_session = successful_scrapes + failed_scrapes + 1
+                
+                # Print progress header
+                print(f"[{current_session:3d}/{total_urls}] ", end="", flush=True)
+                
+                result = scraper.scrape_session(url)
+                
+                if result:
+                    successful_scrapes += 1
+                else:
+                    failed_scrapes += 1
+                
+                # Calculate and display statistics
+                success_rate = (successful_scrapes / current_session) * 100
+                elapsed_time = time.time() - overall_start_time
+                avg_time_per_session = elapsed_time / current_session
+                estimated_remaining = (total_urls - current_session) * avg_time_per_session
+                
+                print(f"📊 Success: {successful_scrapes}/{current_session} ({success_rate:.1f}%) | "
+                      f"Avg: {avg_time_per_session:.1f}s | "
+                      f"ETA: {estimated_remaining/60:.1f}m", flush=True)
+                print("-" * 80, flush=True)
+                
+                if current_session < total_urls:  # Don't delay after last session
+                    time.sleep(delay)
+        
+        # Final summary
+        total_elapsed = time.time() - overall_start_time
+        print("=" * 80)
+        print(f"🏁 SCRAPING COMPLETED!")
+        print(f"✅ Successful: {successful_scrapes}")
+        print(f"❌ Failed: {failed_scrapes}")
+        print(f"📈 Success Rate: {(successful_scrapes/total_urls)*100:.1f}%")
+        print(f"⏱️  Total Time: {total_elapsed/60:.1f} minutes")
+        print(f"⚡ Average per session: {total_elapsed/total_urls:.1f} seconds")
+        print("=" * 80)
+        
+    except KeyboardInterrupt:
+        current_session = successful_scrapes + failed_scrapes
+        success_rate = (successful_scrapes / current_session * 100) if current_session > 0 else 0
+        print(f"\n🛑 SCRAPING INTERRUPTED!")
+        print(f"✅ Successfully saved: {successful_scrapes} sessions")
+        print(f"❌ Failed: {failed_scrapes} sessions") 
+        print(f"📊 Success rate: {success_rate:.1f}%")
+        print(f"📈 Progress: {current_session}/{total_urls} sessions processed")
+    except Exception as e:
+        print(f"💥 Unexpected error during processing: {e}")
     finally:
         scraper.close()
+        print("🔌 WebDriver closed.")

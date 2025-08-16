@@ -225,3 +225,5 @@ $RECYCLE.BIN/
 
 # Ignore all .json files
 *.json
+
+*.xlsx
